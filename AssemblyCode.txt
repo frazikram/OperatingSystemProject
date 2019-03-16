@@ -1,0 +1,23 @@
+Label	Mnemonic	Operands	Description
+Main	Function			Start of main function
+EvenSum	Long		0		Declare var sum and initialize it to 0
+Final	Long		0		Declare var Final and initialize it 0
+Temp	Long		550		Declare variable temperature initialize it to 550
+Count	Long		100		Initialize loop counter to 100
+Start	Move		R2,0		Initialize R2 to 0
+Loop	Add		R2,Count	R2=R2+Count
+	Subtract	Count,2		Count=Count-2
+	BrOnPlus	Count,Loop	If Count>0 Jump to loop
+	Move		Sum,R2		Sum=R2
+	Move		R3,Temp		R3=Temp
+	Subtract	R3,Sum		R3=R3-Sum
+	Divide		R3/100		R3=R3/100
+	Multiply	R3,5		R3=R3*5
+Assignm Move		Temp,R3		Temp=R3
+Check	Branch on minus Temp, Inside	If Temp<0 Jump to Inside
+Else	Move		Final,2		Final=2
+	Branch		End		Jump to halt
+Inside	Move		Final,1		Final=1
+Halt	Halt				Stop execution of the program.
+	End		Start		Exeution starts at Move instruction.
+			
