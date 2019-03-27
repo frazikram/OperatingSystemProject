@@ -796,6 +796,8 @@ void DumpMemory(char *String, long StartAddress, long size)
   printf("Clock =%ld\n",CLK );//Display clock
   printf("PSR =%ld\n",PSR );// display PSR value
   return;
-}  // end of DumpMemory() function
+}  // end of DumpMemory() 
+
+
 
 
