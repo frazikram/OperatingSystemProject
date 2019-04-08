@@ -21,11 +21,10 @@
 #include <string.h>
 #include <assert.h>
 
-//Let us define the Global constants.
-
-#define MEMSIZE 10000
-#define MAXCONTENT 999999
+//Return Codes
+#define Okay 0 //In Unix, Okay is zero.
 #define endOfProgram -1
+#define EndOfList -1
 #define INVALIDaddr -2
 #define ErrorInvalidMode -3
 #define ErrorInvalidOpcode -4
@@ -35,9 +34,22 @@
 #define ErrorInvalidGPR -8
 #define ErrorStackoverflow -9
 #define ErrorStackUnderflow -10
-//In Unix, Okay is zero.
-#define Okay 0
-//HYPO Architecture
+#define ErrorNoEndOfProgram -11
+#define ErrorNoFreeMemory -12
+#define ErrorRunTime -13
+#define ErrorInvalidMemorySize -13
+#define ErrorInvalidSizeORMemoryAddress -14
+#define Halt 1
+#define TimeSliceExpired 2
+#define InputOp 3
+#define OutputOp 4
+//Global Constants
+#define MEMSIZE 10000
+#define MAXCONTENT 999999
+#define StackSize 10
+#define TimeSlice 200
+#define OSMode 1
+#define UserMode 2
 long MainMemory[MEMSIZE];//Main memory
 long MAR; //Memory address register.
 long MBR; //Memory buffer register.
@@ -48,6 +60,12 @@ long PSR; //Process Status register
 long PC; //Program counter
 long SP; //Stack pointer
 long ProgramSize;//program length
+long RQ; //Ready Queue
+long WQ; //Waiting Queue
+long UserFreeList; //User Free List
+long OSFreeList;// OS free list
+long ProcessID; //Process ID
+int shutdown; //Shutdown
 
 //Function prototypes
 void InitializeSystem();		//System Initilizer
@@ -55,6 +73,57 @@ int AbsoluteLoader (char *);		//Program Loader
 long FetchOperand(long , long, long *, long *); //Fetch an instruction from the memory.
 long CPU(); //Executes the loaded program from the memory.
 void DumpMemory(char*, long , long); //Dumps memory
+long AllocateOSMemory(long RequestedSize);
+long CreateProcess(char* filename, long priority);
+void InitializePCB(long PCBptr);
+void PrintPCB(long PCBptr);
+long PrintQueue(long Qptr);
+long InsertIntoRQ(long PCBptr);
+long InsertIntoWQ(long PCBptr);
+long SelectProcessFromRQ();
+void SaveContext(long PCBptr);
+void Dispatcher(long PCBptr);
+void TerminateProcess(long PCBptr);
+long FreeOSMemory(long ptr,long size);
+long AllocateUserMemory(long RequestedSize);
+long FreeUserMemory(long ptr, long size);
+void CheckAndProcessInterrupt();
+long io_getcSystemCall();
+long io_putcSystemCall();
+long MemFreeSystemCall();
+long MemAllocSystemCall();
+long SystemCall(long systemCallID);
+long SearchAndRemovePCBfromWQ ( long pid);
+void ISRinputCompletionInterrupt();
+void ISRoutputCompletionInterrupt();
+void ISRshutdownSystem();
+
+//PCB Components
+const int DefaultPriority = 128;
+const int ReadyState = 1;
+const int Running = 2;
+const int Waiting = 3;
+const int PCBsize = 22;
+const int NextPointer =0;
+const int pcbPID = 1;
+const int PCBState =2;
+const int PCBReason = 3;
+const int PCBPriority = 4;
+const int pcbStackStartAddr = 5;
+const int pcbStackSize = 6;
+const int pcbGPR0 = 11;
+const int pcbGPR1 = 12;
+const int pcbGPR2 = 13;
+const int pcbGPR3 = 14;
+const int pcbGPR4 = 15;
+const int pcbGPR5 = 16;
+const int pcbGPR6 = 17;
+const int pcbGPR7 = 18;
+const int pcbSP = 19;
+const int pcbPC = 20;
+const int pcbPSR = 21;
+
+
 
 // ******************************************************
 // function: main
@@ -72,6 +141,104 @@ void DumpMemory(char*, long , long); //Dumps memory
 int main ()
 {
 
+
+  int status;
+  //Call Initialize System function;
+  InitializeSystem();
+
+  // Run until shutdown
+  while (!shutdown)
+  {
+    // Check and process interrupt
+    //call Check and Process Interrupt function and store return status
+    CheckAndProcessInterrupt();
+    //if interrupt is shutdown, exit from main;
+    if(shutdown)
+    {
+      printf("%s\n","Shutting Down");
+      return status;
+    }
+
+    // Dump RQ and WQ
+    //DumpRQ(“RQ: Before CPU scheduling\n”);
+    printf("%s\n","RQ before scheduling" );
+    PrintQueue(RQ); 
+     //DumpWQ(“WQ: Before CPU scheduling\n”);
+    printf("%s\n","WQ before scheduling" );
+    PrintQueue(WQ);
+     //DumpMemory(“Dynamic Memory Area before CPU scheduling\n”);
+    DumpMemory("Dynamic Area before CPU scheduling\n",0,250);
+
+    // Select next process from RQ to give CPU
+    //Running PCB ptr = Select Process From RQ (); 
+     // call the function
+    long PCBptr=SelectProcessFromRQ();
+ // Perform restore context using Dispatcher
+   // Call Dispatcher function with Running PCB ptr as argument;
+    Dispatcher(PCBptr);
+  //Dump RQ(“RQ: After selecting process from RQ\n”);
+    PrintQueue(RQ);
+    //Dump Running PCB and CPU Context passing  Running PCB ptr as argument;
+    PrintPCB(PCBptr);
+    SaveContext(PCBptr);
+    // Execute instructions of the running process using the CPU
+    //status = CPU Execute Program ();  
+    // call the function
+    status=CPU();
+
+    // Dump dynamic memory area
+    //Dump dynamic memory calling Dump Memory function(“After execute program\n”);
+    DumpMemory("Dynamic Area after CPU scheduling\n",0,250);
+
+    // Check return status – reason for giving up CPU
+    if(status == TimeSliceExpired)
+    {
+      printf("%s\n","Time Slice Expired" );
+      //Save CPU Context of running process in its PCB;  // running process is losing CPU
+      SaveContext(PCBptr);
+      //Insert running process PCB into RQ;
+      InsertIntoRQ(PCBptr);
+      //Set Running PCB ptr = End Of List;
+      PCBptr=EndOfList;
+    }
+    else if((status == Halt) || (status < 0))  // Halt or run-time error
+    {
+      //Terminate running Process;
+      TerminateProcess(PCBptr);
+      //Set Running PCB ptr = End Of List ;
+      PCBptr=EndOfList;
+    }
+    else if(status == InputOp)   // io_getc
+    {
+      printf("%s\n","Input Operation" );
+      //Set reason for waiting in the running PCB to Input Completion Event;
+     SaveContext(PCBptr);
+     // Insert running process into WQ;
+     InsertIntoWQ(PCBptr);
+    //Set Running PCB ptr = End Of List;
+     PCBptr= EndOfList;
+    }
+    else if(status == OutputOp)    // io_putc
+    {
+      printf("%s\n","Output Operation" );
+      //Set reason for waiting in the running PCB to Input Completion Event;
+       SaveContext(PCBptr);
+      //Insert running process into WQ;
+        InsertIntoWQ(PCBptr);
+      //Set Running PCB ptr = End Of List;
+        PCBptr= EndOfList;
+    }
+    else
+    { // Unknown programming error
+     // Display Unknown programming error message;
+       printf("%s\n","Unknown programming error" );
+     }
+  }  // end of while not shutdown loop
+
+  //Print OS is shutting down message;
+  printf("%s\n","OS is shutting down" );
+
+  return(status);  // Terminate Operating System
 
 
 }  // end of main() function
@@ -99,7 +266,8 @@ int main ()
 //	ErrorInvalidPCValue		invalid PC value
 //	0 to Valid address range	Successful Load, valid PC value
 // ************************************************************
-int AbsoluteLoader ( char * filename)		// Input: file name of executable program
+int AbsoluteLoader ( char * filename)		//Method by Fraz Ikram
+// Input: file name of executable program
 {
 
   ProgramSize=0;
@@ -127,7 +295,7 @@ int AbsoluteLoader ( char * filename)		// Input: file name of executable program
 
     if(address== endOfProgram) // checking if the end of the program has been reached
     {
-      if(content>=0 && content<MEMSIZE) //checking if it is within valid memory range
+      if(content>=0 && content<2500) //checking if it is within valid memory range
       {
         return content; //Program counter variable
       }
@@ -137,7 +305,7 @@ int AbsoluteLoader ( char * filename)		// Input: file name of executable program
       }
     }
 
-    else if (address>=0 && content<MAXCONTENT) // If it is not the end of the program
+    else if (address>=0 && content<2500) // If it is not the end of the program
     {
       MainMemory[address]= content;
       ProgramSize++;
@@ -169,7 +337,7 @@ int AbsoluteLoader ( char * filename)		// Input: file name of executable program
 //	None
 // ************************************************************
 
-void InitializeSystem()
+void InitializeSystem() //Method by Fraz Ikram
 {
   printf("Initialization \n");
 	// Initialize all Hypo Machine hardware components to zero
@@ -197,11 +365,19 @@ void InitializeSystem()
 
   int b;
 
-  for(b=0; b<8;b=b+1 )
+  for(b=0; b<8;b++)
   {
     GPR[b]=0;
   }
+  UserFreeList= 2500;
+  MainMemory[UserFreeList]=EndOfList;
+  MainMemory[UserFreeList +1]=5000;
 
+  OSFreeList=7500;
+  MainMemory[OSFreeList]=EndOfList;
+  MainMemory[OSFreeList+1]=2500;
+  RQ=EndOfList;
+  WQ=EndOfList;
 
 
   return;
@@ -225,7 +401,7 @@ void InitializeSystem()
 //	List the error codes here
 // ************************************************************
 
-long CPU()
+long CPU() //Method by Fraz Ikram
 {
   printf(" In the CPU \n");
   CLK=0; // initialize clockto 0
@@ -242,9 +418,10 @@ long CPU()
   long Op2Value;
   long stat =0;//for errors and current status
   long val;
+  long TimeLeft=TimeSlice;
    
   MBR= -2; //start the loop
-  while(MBR!=0) 
+  while(TimeLeft>0) 
   {//checking for errors and a valid Buffer
     //printf(" Inside while loop \n");
     //FETCH instruction.
@@ -259,7 +436,7 @@ long CPU()
     }
     else
     {
-      return -5;
+      return (ErrorInvalidAddress);
     }
 
     IR=MBR; //Copy MBR value into instruction register IR;
@@ -301,6 +478,8 @@ long CPU()
         case 0:
           //printf("Halted.\n");
           CLK=CLK+12;// halt encountered
+          TimeLeft=TimeLeft-12;
+          return(Halt);
           break;
           //ADD
          case 1: stat=  FetchOperand (Op1Mode, Op1Gpr,&Op1Address, &Op1Value);
@@ -603,6 +782,9 @@ long CPU()
                 {
                   return stat;
                 }
+                stat=SystemCall(Op1Value);
+                CLK=CLK+12;
+                TimeLeft=TimeLeft-12;
                 break;
 
                 //for invalid opcode
@@ -639,7 +821,8 @@ return stat;
 //	List all possible error codes here
 // ************************************************************
 
-long FetchOperand(long  OpMode, 	long  OpReg,	long  *OpAddress,long  *OpValue)	// Operand value, output parameter
+long FetchOperand(long  OpMode, 	long  OpReg,	long  *OpAddress,long  *OpValue)	//Method by Fraz Ikram
+// Operand value, output parameter
 {
 	switch(OpMode)
   {
@@ -728,7 +911,7 @@ return 1;
 // Function Return Value
 //	None				
 // ************************************************************
-void DumpMemory(char *String, long StartAddress, long size)
+void DumpMemory(char *String, long StartAddress, long size) //Method by Fraz Ikram
 {
   //Display input parameter String;
   printf("%s\n",String);
@@ -774,118 +957,65 @@ void DumpMemory(char *String, long StartAddress, long size)
 }  // end of DumpMemory() function
 
 //System Call
-long SystemCall(long SystemCallID)
+long SystemCall(long SystemCallID)//Method by Connor Huggan
 {
-  /*
-  Set PSR to OS Mode; // Set system mode to OS mode
-
-  Declare long status set to OK;
+  PSR = OSMode;
+  long status = Okay;
 
   switch(SystemCallID)
   {
-    Case 1: // Create process – user process is creating a child process. 
-Display create process system call not implemented;
-      break;
+    case 1: printf("Create process system call was not implemented\n");
+    break;
+    case 2: printf("Delete process system call was not implemented\n");
+    break;
+    case 3: printf("Process inquiry system call was not implemented\n");
+    break;
+    case 4: status = MemAllocSystemCall();
+    break;
+    case 5: status = MemFreeSystemCall();
+    break;
+    case 6: break;
+    case 7: break;
+    case 8: status = io_getcSystemCall();
+    break;
+    case 9: status = io_putcSystemCall();
+    break;
+    default: printf("Invalid system call ID\n");
+    break;
 
-    Case 2:  // Delete process
-Display delete process system call not implemented;
-      break;
+    return(status);
+  }
 
-    Case 3:  // process inquiry
-Display process inquiry system call not implemented;
-      break;
-
-    Case 4:  // Dynamic memory allocation: Allocate user free memory system call
-Status = MemAllocSystemCall();
-      break;
-
-    Case 5:  // Free dynamically allocated user memory system call
-Status = MemFreeSystemCall();
-      break;
-
-
-    // Display system call not implemented message 
-// for all other system calls like above
-
-
-    Case 8:  // io_getc  system call
-Status = io_getcSystemCall ();
-      break;
-
-    Case 9:  // io_putc system call
-Status = io_putcSystemCall();
-      break;
-
-
-    // Display system call not implemented message 
-// for all other system calls like above
-
-
-    Default:    // Invalid system call ID
-      Display invalid system call ID error message;
-      break;
-  }  // end of SystemCallID switch statement
-
-  Set PSR to User Mode; // Set system mode to user mode
-*/
   return (status);
 }  // end of SystemCall() function
 
 //Allocate Dynamic User Memory System Call
 
-long MemAllocSystemCall()
+long MemAllocSystemCall()//Method by Connor Huggan
 {
-  /*
-  // Allocate memory from user free list
-  // Return status from the function is either the address of allocated memory or an error code
+  long size = GPR[2];
 
-  Declare long Size and set it to GPR2 value;
-
-  // Add code here to check for size out of range
-
-  // Check size of 1 and change it to 2
-  If (Size  == 1)
-    Size = 2;
-
-  Set GPR1 = Allocate User Memory passing Size argument;
-  if(GPR1 is less than 0)
+  GPR[1] = AllocateUserMemory(size);
+  if(GPR[1] < 0)
   {
-    Set GPR0 = GPR1;  // Set GPR0 to have the return status
+    GPR[0] = GPR[1];
   }
   else
   {
-    Set GPR0 to OK;
+    GPR[0] = Okay;
   }
-
-              Display Mem_alloc system call, and parameters GPR0, GPR1, GPR2
-*/
-
-  Return GPR0;
-}  // end of MemAllocaSystemCall() function
-
+  printf("Memory Aollocation System Call \n%ld\n%ld\n%ld\n", GPR[0], GPR[1], GPR[2]);
+  return(GPR[0]);
+}
 //Free Dynamic User Memory System Call
 
-long MemFreeSystemCall()
+long MemFreeSystemCall()//Method by Connor Huggan
 {
-  /*
-  // Return dynamically allocated memory to the user free list
-  // GPR1 has memory address and GPR2 has memory size to be released
-  // Return status in GPR0
+long size = GPR[2];
 
-  Declare long Size setting it to GPR2 value;
-
-  // Add code to check for size out of range
-
-  // Check size of 1 and change it to 2
-  If (Size is 1)
-    Set Size to 2;
-
-  Set GPR0 = Call Free User Memory(pass GPR1 and Size as arguments);
-
-              Display Mem_free system call, and parameters GPR0, GPR1, GPR2;
-
-  */
-  Return GPR0;
+  GPR[0] = FreeUserMemory(GPR[1], size);
+  printf("Memory Free System Call \n%ld\n%ld\n%ld\n",GPR[0], GPR[1], GPR[2]);
+  return(GPR[0]);
 }  // end of MemAllocaSystemCall() function
 
 //io_getc System Call
@@ -893,129 +1023,189 @@ long MemFreeSystemCall()
 long io_getcSystemCall ()
 {
   //Return start of input operation event code;
+  printf("get_c system call\n");
+  return(InputOp);
 
 }  // end of io_getc system call
-
-long CreateProcess (char &filename, long priority)  // or char * pointer
+long io_putcSystemCall ()
 {
-  /*
+  //Return start of output operation event code;
+  printf("put_c system call\n");
+  return(OutputOp);
+
+}  // end of io_putc system call
+
+
+long CreateProcess (char* filename, long priority)  // or char * pointer
+{
+  
   // Allocate space for Process Control Block
-      Set PCBptr = Allocate OS Memory for PCB;  // return value contains address or error
-      Check for error and return error code, if memory allocation failed
+      long PCBptr= AllocateOSMemory(PCBsize);
+       // return value contains address or error
+      if(PCBptr<0)
+      {
+        return(PCBptr);
+      }
 
       // Initialize PCB: Set nextPCBlink to end of list, default priority, Ready state, and PID
-      Initialize PCB passing PCBptr as argument;
+      //Initialize PCB passing PCBptr as argument;
+      InitializePCB(PCBptr);
  
       // Load the program
-      Set value =load the program calling by Absolute Loader passing filename as argument;
-      Check for error and return error code, if loading program failed
+      //Set value =load the program calling by Absolute Loader passing filename as argument;
+      long value= AbsoluteLoader(filename);
+
+      //Check for error and return error code, if loading program failed
+
+      if(value<0)
+      {
+        return (value);
+      }
 
       // store PC value in the PCB of the process
-     Set PC value in the PCB = value;  
+     //Set PC value in the PCB = value; 
+     MainMemory[PCBptr+pcbPC]=value; 
 
       // Allocate stack space from user free list
-      Set ptr = Allocate User Memory of size StackSize;
+      //Set ptr = Allocate User Memory of size StackSize;
+     long ptr= AllocateUserMemory(StackSize);
        if (ptr < 0) // check for error
       {  // User memory allocation failed
-  Free allocated PCB space by calling Free OS Memory passing PCBptr and  PCBsize;
-  return(ptr);  // return error code
+        // Free allocated PCB space by calling Free OS Memory passing PCBptr and  PCBsize;
+        FreeOSMemory(PCBptr,PCBsize);
+        return(ptr);  // return error code
       }
 
       // Store stack information in the PCB – SP, ptr, and size
-      Set SP in the PCB = ptr + Stack Size;  // empty stack is high address, full is low address
-      Set stack start address in the PCB to ptr;
-      Set stack size in the PCB = Stack Size;
+      //Set SP in the PCB = ptr + Stack Size;  
+      MainMemory[PCBptr+pcbSP]=ptr+StackSize;
+      // empty stack is high address, full is low address
+      //Set stack start address in the PCB to ptr;
+      MainMemory[PCBptr+pcbStackStartAddr]=ptr;
+      //Set stack size in the PCB = Stack Size;
+      MainMemory[PCBptr+pcbStackSize]=StackSize;
+    // Set priority in the PCB = priority; // Set priority
+      MainMemory[PCBptr+PCBPriority]=priority;
 
-      Set priority in the PCB = priority; // Set priority
+     //Dump program area;
+      DumpMemory("Dumping program area.\n",0,200);
 
-     Dump program area;
-
-     Print PCB passing PCBptr; 
+     //Print PCB passing PCBptr; 
+     PrintPCB(PCBptr);
 
      // Insert PCB into Ready Queue according to the scheduling algorithm
-     Insert PCB into Ready Queue passing PCBptr;
-  */
-     return(OK);
+     //Insert PCB into Ready Queue passing PCBptr;
+     InsertIntoRQ(PCBptr);
+  
+     return(Okay);
 }  // end of CreateProcess() function
 
-//Initialize PCB
 
-void InitializePCB (long PCBptr)
+
+void InitializePCB (long PCBptr)// Method by Fraz Ikram
 {
-     /* Set entire PCB area to 0 using PCBptr;  // Array initialization
-     
-     // Allocate PID and set it in the PCB. PID zero is invalid
-     Set PID field in the PCB to = ProcessID++;  // ProcessID is global variable initialized to 1
-
-     Set priority field in the PCB = Default Priority;  // DefaultPriority is a constant set to 128
-     Set state field in the PCB = ReadyState;    // ReadyState is a constant set to 1
-     Set next PCB pointer field in the PCB = EndOfList;  // EndOfList is a constant set to -1
-
-     */
-     return;
+	//Initialize PCB
+	for(int i=0; i<PCBsize; i++)  //Set entire PCB area to 0 using PCBptr;  
+	{
+		MainMemory[PCBptr+i]=0; // Array initialization
+	}
+	MainMemory[PCBptr+pcbPID]= ProcessID++;   
+	// Allocate PID and set it in the PCB. PID zero is invalid
+   //  Set PID field in the PCB to = ProcessID++;  
+   // ProcessID is global variable initialized to 1
+	MainMemory[PCBptr+PCBPriority]=DefaultPriority;
+	// Set priority field in the PCB = Default Priority;  
+	// DefaultPriority is a constant set to 128
+	MainMemory[PCBptr+PCBState]= ReadyState;
+	//Set state field in the PCB = ReadyState;    
+	// ReadyState is a constant set to 1
+	MainMemory[PCBptr+NextPointer]= EndOfList;
+	 // Set next PCB pointer field in the PCB = EndOfList;  
+	 // EndOfList is a constant set to -1
+	return;
 }  // end of InitializePCB
 
 //Print PCB values
 
-Void PrintPCB(long PCBptr)
+void PrintPCB(long PCBptr)//Method by Fraz Ikram
 {
-  /*Print the values of the following fields from PCB with a text before the value like below:
-    PCB address = 6000, Next PCB Ptr = 5000, PID = 2, State = 2, PC = 200, SP = 4000, 
-Priority = 127, Stack info: start address = 3990, size = 10
-    GPRs = print 8 values of GPR 0 to GPR 7
-    */
+  //Print the values of the following fields from PCB with a text before the value like below:
+  //PCB address = 6000, Next PCB Ptr = 5000, PID = 2, State = 2, PC = 200, SP = 4000, 
+    printf("PCB Address = %ld\n", PCBptr);
+    printf("Next PCB Ptr = %ld\n", MainMemory[PCBptr + NextPointer]);
+    printf("PID = %ld\n", MainMemory[PCBptr + pcbPID]);
+    printf("State = %ld\n", MainMemory[PCBptr + PCBState]);
+    printf("PC = %ld\n", MainMemory[PCBptr + pcbPC]);
+    printf("SP = %ld\n", MainMemory[PCBptr + pcbSP]);
+  //Priority = 127, Stack info: start address = 3990, size = 10
+    printf("Priority = %ld\n", MainMemory[PCBptr + PCBPriority]);
+    printf("Stack Info: Start Address = %ld\n", MainMemory[PCBptr + pcbStackStartAddr]);
+    
+  //GPRs = print 8 values of GPR 0 to GPR 7
+    printf("Size = %ld\n", MainMemory[PCBptr + pcbStackSize]);
+    printf("GPR0 = %ld\n", MainMemory[PCBptr + pcbGPR0]);
+    printf("GPR1 = %ld\n", MainMemory[PCBptr + pcbGPR1]);
+    printf("GPR2 = %ld\n", MainMemory[PCBptr + pcbGPR2]);
+    printf("GPR3 = %ld\n", MainMemory[PCBptr + pcbGPR3]);
+    printf("GPR4 = %ld\n", MainMemory[PCBptr + pcbGPR4]);
+    printf("GPR5 = %ld\n", MainMemory[PCBptr + pcbGPR5]);
+    printf("GPR6 = %ld\n", MainMemory[PCBptr + pcbGPR6]);
+    printf("GPR7 = %ld\n", MainMemory[PCBptr + pcbGPR7]);
+    
 }  // end of PrintPCB() function
 
 //Print Given Queue
 
-long PrintQueue (long Qptr)
+long PrintQueue (long Qptr) //Method by Fraz Ikram
 {
   // Walk thru the queue from the given pointer until end of list
   // Print each PCB as you move from one PCB to the next
-/*
-  Declare long currentPCBPtr = Qptr;
 
-  if(currentPCBPtr is End of List)
+   long currentPCBPtr = Qptr;
+
+  if(currentPCBPtr==EndOfList)
   {
-    Display empty list message;
-    return(OK);
+    printf("Empty list.\n");
+    return(Okay);
   }
 
   // Walk thru the queue
-  While(currentPCBPtr is not equal to End of List)
+  while(currentPCBPtr != EndOfList)
   {
-    Print PCB passing currentPCBPtr;
-    Set currentPCBPtr = next PCB pointer using currentPCBPtr;
+    //Print PCB passing currentPCBPtr;
+    PrintPCB(currentPCBPtr);
+    currentPCBPtr = MainMemory[currentPCBPtr+NextPointer];
   }  // end of while loop
-*/
-  return (OK);
+
+  return (Okay);
 }  // end of PrintQueue() function
 
 
 //Insert PCB into ready Queue
 
-long InsertIntoRQ (long PCBptr)
+long InsertIntoRQ (long PCBptr)//Method by Fraz Ikram
 {
-  /*
+  
   // Insert PCB according to Priority Round Robin algorithm
   // Use priority in the PCB to find the correct place to insert.
-long previousPtr = EndOfList;
-long currentPtr = RQ;
+	long previousPtr = EndOfList;
+	long currentPtr = RQ;
 
   // Check for invalid PCB memory address
-     if((PCBptr < 0) || (PCBptr >MaxMemoryAddress))
+     if((PCBptr < 0) || (PCBptr >MEMSIZE-1))
      {
-  display invalid address error message;
-  return(ErrorInvalidMemoryAddress);  // Error code < 0
+  //display invalid address error message;
+     	printf("Error: PCB address is invalid. \n");
+ 		 return(ErrorInvalidAddress);  // Error code < 0
      }
 
-     Memory[PCBptr + StateIndex] = Ready;   // set state to ready state
-     Memory[PCBptr + NextPointerIndex] = EndOfList;  // set next pointer to end of list
+     MainMemory[PCBptr + PCBState] = ReadyState;   // set state to ready state
+     MainMemory[PCBptr + NextPointer] = EndOfList;  // set next pointer to end of list
 
      if( RQ == EndOfList) // RQ is empty
      {
-  RQ = PCBptr;
-  return(OK);
+ 		 RQ = PCBptr;
+  		return(Okay);
      }
 
   // Walk thru RQ and find the place to insert
@@ -1023,101 +1213,120 @@ long currentPtr = RQ;
 
      while( currentPtr != EndOfList)
      {
-if(Memory[PCBptr + PriorityIndex] > Memory[currentPtr + PriorityIndex])
-{ // found the place to insert
-       if(previousPtr == EndOfList)
-       {
-  // Enter PCB in the front of the list as first entry
-  Memory[PCBptr + NextPCBPointerIndex] = RQ;
-  RQ = PCBptr;
-  return(OK);
+		if(MainMemory[PCBptr + PCBPriority] > MainMemory[currentPtr + PCBPriority])
+		{ // found the place to insert
+       	if(previousPtr == EndOfList)
+       	{
+  		// Enter PCB in the front of the list as first entry
+  		MainMemory[PCBptr + NextPointer] = RQ;
+  		RQ = PCBptr;
+  		return(Okay);
        }
   // enter PCB in the middle of the list
-       Memory[PCBptr +NextPCBPointerIndex] = Memory[previousPtr + NextPCBPointerIndex];
-       Memory[previousPtr + NextPCBPointerIndex] = PCBptr;
-       return(OK);
+       MainMemory[PCBptr +NextPointer] = MainMemory[previousPtr + NextPointer];
+       MainMemory[previousPtr + NextPointer] = PCBptr;
+       return(Okay);
 }
 else  // PCB to be inserted has lower or equal priority to the current PCB in RQ
 { // go to the next PCB in RQ
   previousPtr = currentPtr;
-  currentPtr = Memory[currentPtr+NextPCBPointerIndex];
+  currentPtr = MainMemory[currentPtr+NextPointer];
 }
      }  // end of while loop
 
      // Insert PCB at the end of the RQ
-     Memory[previousPtr + NextPointerIndex] = PCBptr;
-     */
-     return(OK); 
+     MainMemory[previousPtr + NextPointer] = PCBptr;
+     
+     return(Okay); 
 
 }  // end of InsertIntoRQ() function
 
 //Insert PCB into waiting queue
 
-long InsertIntoWQ (long PCBptr)
-{
-  /*
+long InsertIntoWQ (long PCBptr) //Method by Fraz Ikram
+{ 
   // Insert the given PCB at the front of WQ
+   // Check for invalid PCB memory address
+  if((PCBptr < 0) || (PCBptr >MEMSIZE))
+    {
+      printf("Error: Invalid PCB address.\n");
+      return(ErrorInvalidAddress);  // Error code < 0
+    }
+    MainMemory[PCBptr + PCBState] = Waiting;  // set state to ready state
+      MainMemory[PCBptr + NextPointer] = WQ;  // set next pointer to end of list
 
-  // Check for invalid PCB memory address
-if((PCBptr < 0) || (PCBptr >MaxMemoryAddress))
-      {
-    display invalid PCB address error message;
-    return(ErrorInvalidMemoryAddress);  // Error code < 0
-      }
+      WQ = PCBptr;
 
-Memory[PCBptr + StateIndex] = Waiting;  // set state to ready state
-Memory[PCBptr + NextPointerIndex] = WQ;  // set next pointer to end of list
-
-WQ = PCBptr;
-*/
-      return (OK);
-}  // end of InsertIntoWQ () function
+      return (Okay);
+}    
+ // end of InsertIntoWQ () function
 
 //Select first process from RQ to Give CPU
-long SelectProcessFromRQ()
+long SelectProcessFromRQ()//Method by Fraz Ikram
 {
-  /*
-  Declare PCBptr as type long and initialize to RQ;  // first entry in RQ
+  
+  //Declare PCBptr as type long and initialize to RQ;  // first entry in RQ
+  long PCBptr=RQ;
 
-  if(RQ != End of List)
+  if(RQ != EndOfList)
   {
         // Remove first PCB from RQ
-       Set RQ = Next PCB pointed by RQ;
+       RQ = MainMemory[RQ+NextPointer];
   }
 
   // Set next point to EOL in the PCB
-            Set Next PCB field in the given PCB to End Of List;
-            */
+  //Set Next PCB field in the given PCB to End Of List;
+  MainMemory[PCBptr+NextPointer]=EndOfList;
+            
 
   return(PCBptr);
 }  // end of SelectProcessFromRQ() function
 
 //Save CPU context into Running Process PCB
-void SaveContext(long PCBptr)
+void SaveContext(long PCBptr) //Fraz Ikram
 {
   // Assume PCBptr is a valid pointer.
-  /*
+  
 
-  Copy all CPU GPRs into PCB using PCBptr with or without using loop
+  //Copy all CPU GPRs into PCB using PCBptr with or without using loop
+	MainMemory[PCBptr+pcbGPR0]=GPR[0];
+	MainMemory[PCBptr+pcbGPR1]=GPR[1];
+	MainMemory[PCBptr+pcbGPR2]=GPR[2];
+	MainMemory[PCBptr+pcbGPR3]=GPR[3];
+	MainMemory[PCBptr+pcbGPR4]=GPR[4];
+	MainMemory[PCBptr+pcbGPR5]=GPR[5];
+	MainMemory[PCBptr+pcbGPR6]=GPR[6];
+	MainMemory[PCBptr+pcbGPR7]=GPR[7];
 
-  Set SP field in the PCB = SP;   // Save SP
-  Set PC field in the PCB = PC; // Save PC
-  */
+  //Set SP field in the PCB = SP;  Save SP
+	MainMemory[PCBptr+pcbSP]=SP;
+  //Set PC field in the PCB = PC Save PC
+	MainMemory[PCBptr+pcbPC]=PC;
+  
   return;
 }  // end of SaveContext() function
 
 //Restore CPU context from the given PCB
-void Dispatcher(long PCBptr)
+void Dispatcher(long PCBptr)//Method by Fraz Ikram
 {
   // PCBptr is assumed to be correct.
 
   // Copy CPU GPR register values from given PCB into the CPU registers
   // This is opposite of save CPU context
-
+  GPR[0]=MainMemory[PCBptr+pcbGPR0];
+  GPR[1]=MainMemory[PCBptr+pcbGPR1];
+  GPR[2]=MainMemory[PCBptr+pcbGPR2];
+  GPR[3]=MainMemory[PCBptr+pcbGPR3];
+  GPR[4]=MainMemory[PCBptr+pcbGPR4];
+  GPR[5]=MainMemory[PCBptr+pcbGPR5];
+  GPR[6]=MainMemory[PCBptr+pcbGPR6];
+  GPR[7]=MainMemory[PCBptr+pcbGPR7];
   // Restore SP and PC from given PCB
-
+  SP=MainMemory[PCBptr+pcbSP];
+  PC=MainMemory[PCBptr+pcbPC];
   // Set system mode to User mode
   //PSR = UserMode; // UserMode is 2, OSMode is 1.
+  PSR=UserMode;
 
   return;
 }  // end of Dispatcher() function
@@ -1125,10 +1334,12 @@ void Dispatcher(long PCBptr)
 
 //Terminate Process
 
-Void TerminateProcess (long PCBptr)
+void TerminateProcess (long pcb_pointer)//Method by Connor Huggan
 {
   // Return stack memory using stack start address and stack size in the given PCB
 
+  FreeUserMemory(MainMemory[pcb_pointer + pcbStackStartAddr], MainMemory[pcb_pointer + pcbStackSize]);
+  FreeOSMemory(pcb_pointer, PCBsize);
   // Return PCB memory using the PCBptr
 
   return;
@@ -1136,277 +1347,377 @@ Void TerminateProcess (long PCBptr)
 
 //Allocate OS Memory
 
-long AllocateOSMemory (long RequestedSize);  // return value contains address or error
+long AllocateOSMemory (long RequestedSize)//Method by Fraz Ikram
+ // return value contains address or error
 {
-  /*
+
   // Allocate memory from OS free space, which is organized as link
-     if(OSFreeList == EndOfLisrt)
+     if(OSFreeList == EndOfList)
      {
-  display no free OS memory error;
-  return(ErrorNoFreeMemory);   // ErrorNoFreeMemory is constant set to < 0
+       printf("%s\n","No Free Memory" );
+      return(ErrorNoFreeMemory);   // ErrorNoFreeMemory is constant set to < 0
       }
      if(RequestedSize < 0)
      {
-  display invalid size error;
-  return(ErrorInvalidMemorySize);  // ErrorInvalidMemorySize is constant < 0
+      printf("Error, Invalid MEMSIZE");
+      return(ErrorInvalidMemorySize);  // ErrorInvalidMemorySize is constant < 0
      }
       if(RequestedSize == 1)
-  RequestedSize = 2;  // Minimum allocated memory is 2 locations
+      RequestedSize = 2;  // Minimum allocated memory is 2 locations
 
-      CurrentPtr = OSFreeList;
-       PreviousPtr = EOL;
-      while (CurrentPtr != EndOfList)
-      {
-  // Check each block in the link list until block with requested memory size is found
-  if(Memory[CurrentPtr + 1] == RequestedSize)
-  {  // Found block with requested size.  Adjust pointers
+       long CurrentPtr = OSFreeList;
+       long PreviousPtr = EndOfList;
+    while (CurrentPtr != EndOfList)
+    {
+       // Check each block in the link list until block with requested memory size is found
+       if(MainMemory[CurrentPtr + 1] == RequestedSize)
+      {  
+        // Found block with requested size.  Adjust pointers
         if(CurrentPtr == OSFreeList)  // first block
         {
-    OSFreeList = Memory[CurrentPtr];  // first entry is pointer to next block
-    Memory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
-    Return(CurrentPtr); // return memory address
+           OSFreeList = MainMemory[CurrentPtr];  // first entry is pointer to next block
+           MainMemory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
+           return(CurrentPtr); // return memory address
         }
         else  // not first black
         {
-    Memory[PreviousPtr] = Memory[CurrentPtr];  // point to next block
-    Memory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
-    return(CurrentPtr);    // return memory address
+          MainMemory[PreviousPtr] = MainMemory[CurrentPtr];  // point to next block
+          MainMemory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
+          return(CurrentPtr);    // return memory address
         }
-               }
-      else if(Memory[CurrentPtr + 1] > RequestedSize)
-  {  // Found block with size greater than requested size
+      }
+      else if(MainMemory[CurrentPtr + 1] > RequestedSize)
+    {  
+  // Found block with size greater than requested size
         if(CurrentPtr == OSFreeList)  // first block
         {
-    Memory[CurrentPtr + RequestedSize] = Memory[CurrentPtr];  // move next block ptr
-    Memory[CurrentPtr + RequestSize + 1] = Memory[CurrentPtr +1] – RequestedSize;
-    OSFreeList = CurrentPtr + RequestedSize;  // address of reduced block
-    Memory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
-    return(CurrentPtr); // return memory address
+        MainMemory[CurrentPtr + RequestedSize] = MainMemory[CurrentPtr];  // move next block ptr
+        MainMemory[CurrentPtr + RequestedSize + 1] = MainMemory[CurrentPtr +1] - RequestedSize;
+        OSFreeList = CurrentPtr + RequestedSize;  // address of reduced block
+        MainMemory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
+          return(CurrentPtr); // return memory address
         }
         else  // not first black
         {
-    Memory[CurrentPtr + RequestedSize] = Memory[CurrentPtr];  // move next block ptr
-    Memory[CurrentPtr + RequestSize + 1] = Memory[CurrentPtr +1] – RequestedSize;
-    Memory[PreviousPtr] = CurrentPtr + RequestedSize;  // address of reduced block
-    Memory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
-    return(CurrentPtr); // return memory address
+        MainMemory[CurrentPtr + RequestedSize] = MainMemory[CurrentPtr];  // move next block ptr
+        MainMemory[CurrentPtr + RequestedSize + 1] = MainMemory[CurrentPtr +1] - RequestedSize;
+        MainMemory[PreviousPtr] = CurrentPtr + RequestedSize;  // address of reduced block
+        MainMemory[CurrentPtr] = EndOfList;  // reset next pointer in the allocated block
+        return(CurrentPtr); // return memory address
         }
   }
-  else  // small block 
-  {  // look at next block
-        Previousptr = CurrentPtr;
-         CurrentPtr = Memory[CurrentPtr];
-  }
-      } // end of while CurrentPtr loop
+     else // small block 
+    {  
+    // look at next block
+         PreviousPtr = CurrentPtr;
+         CurrentPtr = MainMemory[CurrentPtr];
+    }
+} // end of while CurrentPtr loop
 
-      display no free OS memory error;
-      return(ErrorNoFreeMemory);   // ErrorNoFreeMemory is constant set to < 0
-      */
+      printf("%s\n","Error No Free OS Memory" );
+      return(ErrorNoFreeMemory);   
+      // ErrorNoFreeMemory is constant set to < 0
+      
 }  // end of AllocateOSMemory() function
 
 //Free OS Memory
-long FreeOSMemory (long ptr, long size);  // return value contains OK or error code
+long FreeOSMemory (long ptr, long size) //Method by Connor Huggan
+ // return value contains OK or error code
 {
-    /*
-     if (ptr is outside the OS free list area)    // Address range is given in the class
-     {
-  display invalid address error message;
-  return(ErrorInvalidMemoryAddress);  // ErrorInvalidMemoryAddress is constantset to  < 0
-     }
-    
-     if(size is 1)  // check for minimum allocated size, which is 2 even if user asks for 1 location
-     {
-  Set size = 2;  // minimum allocated size
-      }
-     else if( size is less than 1) OR ((ptr+size) greater than or equal to Maximum Memory Address))
-     {  // Invalid size
-  display invalid size or address error message;
-  return(ErrorInvalidSizeORMemoryAddress);    // All error codes are < 0
-     } 
+   if(size == 1)
+  {
+    size = 2;
+  }
+  if(ptr < 7500 || ptr >9999)
+  {
+    printf("ERROR: InvalidMemoryAddress \n");
+    return(ErrorInvalidAddress);
+  }
+  else if(size < 1 || (size + ptr) > 9999)
+  {
+    printf("ERROR: InvalidMemoryAddress \n");
+    return(ErrorInvalidSizeORMemoryAddress);
+  }
+  OSFreeList = 7500;
+  MainMemory[OSFreeList] = EndOfList;
+  MainMemory[OSFreeList + 1] = 2500;
 
-  // Return memory to OS free space.  Insert at the beginning of the link list
-//    Insert the given free block at the beginning of the OS free list;
-    Make the given free block point to free block pointed by OS free List;
-    Set the free block size in the given free block;
-    Set OS Free List point to the given free block;
-    */
+  return(Okay);
 
-     return (OK);
 }  // end of FreeOSMemory() function
 
 //Allocate User Memory
 
-Long AllocateUserMemory (long size);  // return value contains address or error code
+long AllocateUserMemory (long size)
+  // return value contains address or error code
 {
   // Allocate memory from User free space, which is organized as link
   // copy OS code and modify to use UserFreeList
+  if(UserFreeList == EndOfList)
+  {
+    printf("ERROR: No Free Memory\n");
+    return(ErrorNoFreeMemory);
+  }
+  if(size < 0)
+  {
+    printf("ERROR: Invalid Memory Size\n");
+    return(ErrorInvalidMemorySize);
+  }
+  if(size == 1)
+  {
+    size = 2;
+  }
+  long currentPtr = UserFreeList;
+  long previousPtr = EndOfList;
+
+  while(currentPtr != EndOfList)
+  {
+    if(MainMemory[currentPtr +1] == size)
+    {
+      if(currentPtr == UserFreeList)
+      {
+        UserFreeList = MainMemory[currentPtr];
+        MainMemory[currentPtr] = EndOfList;
+        return(currentPtr);
+      }
+      else
+      {
+        MainMemory[previousPtr] = MainMemory[currentPtr];
+        MainMemory[currentPtr] = EndOfList;
+        return(currentPtr);
+      }
+    }   
+    else if(MainMemory[currentPtr + 1] > size)
+    {
+      if(currentPtr == UserFreeList)
+      {
+        MainMemory[currentPtr + size] = MainMemory[currentPtr];
+        MainMemory[currentPtr + size + 1] = MainMemory[currentPtr + 1];
+        UserFreeList = currentPtr + size;
+        MainMemory[currentPtr] = EndOfList;
+        return(currentPtr);
+      }
+      else
+      {
+        MainMemory[currentPtr + size] = MainMemory[currentPtr];
+        MainMemory[currentPtr + size + 1] = MainMemory[currentPtr + 1];
+        MainMemory[previousPtr] = currentPtr + size;
+        MainMemory[currentPtr] = EndOfList;
+        return(currentPtr);
+      }
+    }
+    else
+    {
+      previousPtr = currentPtr;
+      currentPtr = MainMemory[currentPtr];
+    }
+  }
 }  // end of AllocateUserMemory() function
 
 //Free User Memory
 
-long FreeUserMemory (long ptr,  long size);  // return value contains OK or error code
+long FreeUserMemory (long ptr,  long size)  //Method by Fraz Ikram
+// return value contains OK or error code
 {
-  /*  
+  
   // Return memory to User free space.  
 // Insert the returned free block at the beginning of the link list
 
   // This code is similar to free OS memory
 
-     If (ptr out side the free user memory area )  // user memory area is given in the class
+     if (ptr > 7499|| ptr <2500 )  // user memory area is given in the class
      {
-  display invalid address error message;
-  return(ErrorInvalidMemoryAddress);  // ErrorInvalidMemoryAddress is constantset to  < 0
+  		printf("%s\n","ErrorInvalidAddress");
+  		return(ErrorInvalidAddress);  
+  		// ErrorInvalidMemoryAddress is constantset to  < 0
      }
   // Check for invalid size and minimum size
-     if(size is 1)  // check for minimum allocated size, which is 2 even if user asks for 1 location
+     if(size ==1)  // check for minimum allocated size, which is 2 even if user asks for 1 location
      {
-  Set size = 2;  // minimum allocated size
+  		size = 2;  // minimum allocated size
       }
-     else if((size < 1) OR ((ptr+size) outside maximum free user memory area))  // invalid size
+     else if((size < 1) || ((ptr+size) > 7499))  // invalid size
      {  // Invalid size
-  display invalid size or address error message;
-  return(ErrorInvalidSizeORMemoryAddress);    // All error codes are < 0
+  		printf("%s\n","Error: Invalid address or size");
+ 		return(ErrorInvalidSizeORMemoryAddress);    // All error codes are < 0
      } 
   // Insert the free block at the beginning of the link list
-  // Code is similar to free OS free block
-  */
+     UserFreeList=2500;
+     MainMemory[UserFreeList]= EndOfList;
+     MainMemory[UserFreeList+1]=5000; 
 
-     return (OK);
+     return (Okay);
 }  // end of FreeUserMemory() function
 
 //Check and Process Interrupt
 
-Void CheckAndProcessInterrupt()
+void CheckAndProcessInterrupt()//Method by Connor Huggam
 {
-  /*
-  // Prompt and read interrupt ID
-  Display possible interrupts:  // 0 – no interrupt
-          // 1 – run program
-          // 2 – shutdown system
-          // 3 – Input operation completion (io_getc)
-          // 4 – Output operation completion (io_putc)
-  Read interrupt ID;
-              Display the interrupt value that was read;
   
-  // Process interrupt
-  switch(InterruptID)
+  printf("0 - no interrupt\n");
+  printf("1 - run program\n");
+  printf("2 - shutdown system\n");
+  printf("3 - input operation completion\n");
+  printf("4 - output operation completion\n");
+
+  int intID;
+  printf("Please enter which interrupt ID =>\n");
+  scanf("%d", &intID);
+
+  switch(intID)
   {
-    case 0:   // No interrupt
-      break;
+    case 0: break;
+    case 1: ISRrunProgramInterrupt();
+    break;
+    case 2: ISRshutdownSystem();
+    break;
+    case 3: ISRinputCompletionInterrupt();
+    break;
+    case 4: ISRoutputCompletionInterrupt();
+    break;
+    default: printf("ERROR invalid interrupt ID\n");
+    break;
 
-    case 1:   // Run program
-      call ISR run Program Interrupt function;
-      break;
-
-    case 2:   // Shutdown system
-      call ISR shutdown System Interrupt function;
-      set system shutdown status in a global variable to check in main and exit;
-      break; 
-
-    case 3:   // Input operation completion – io_getc
-      call ISR input Completion Interrupt function;
-      break;
-
-    case 4:   // Output operation completion – io_putc
-      call ISR output Completion Interrupt function;
-      break;
-
-    default:    // Invalid Interrupt ID
-      Display invalid interrupt ID message;
-      break;
-  }  // end of switch InterruptID
-  */
+  }
+  return;
   return;
 }  // end of CheckAndProcessInterrupt() function
 
 //Run Program Interrupt Service Routing
-void ISRrunProgramInterrupt();
+void ISRrunProgramInterrupt()//Fraz Ikram
 {
   /*
   Prompt and read filename;
   Call Create Process passing filename and Default Priority as arguments;
   */
+  char file[100];
+  printf("%s\n","File Name: ");
+  scanf("%s", &file);
+  CreateProcess(file,DefaultPriority);
   return;
 }  // end of ISRrunProgram() function
 
 //Input Completion interrupt
-Void ISRinputCompletionInterrupt()
+void ISRinputCompletionInterrupt()//Method by Fraz Ikram
 {
-  /*
-  Prompt and read PID of the process completing input completion interrupt;
+  //Prompt and read PID of the process completing input completion interrupt;
+  printf("%s\n","PID:");
+  long pid= scanf("%ld");
+  //Search WQ to find the PCB having the given PID
+  long PCBptr= SearchAndRemovePCBfromWQ(pid);
+    if(PCBptr==EndOfList)
+    {
+      //Remove PCB from the WQ;
+      PCBptr= RQ;
+      while(PCBptr != EndOfList)
+      {
+        //Read one character from standard input device keyboard;
+        //Set process state to Ready in the PCB;
+        //Insert PCB into RQ;
+        if(MainMemory[PCBptr+pcbPID]==pid)
+        {
+          //Reading character from standard input
+          printf("%s\n","Please enter char" );
+           char c=scanf("%s");
+         //Store the character in the GPR in the PCB;   
+         // type cast char to long
+          long ch= (long)c;
+          MainMemory[PCBptr+pcbGPR0]=ch;
 
-  Search WQ to find the PCB having the given PID
-  {
-Remove PCB from the WQ;
-Read one character from standard input device keyboard;
-Store the character in the GPR in the PCB;   // type cast char to long
-Set process state to Ready in the PCB;
-Insert PCB into RQ;
-}
+        }
+        else
+        {
+          PCBptr=MainMemory[PCBptr+MainMemory[NextPointer]];
+        }
+      }
+    }
 
-  If no match is found in WQ, then search RQ
+  //If no match is found in WQ, then search RQ
+  else
   {
-Read one character from standard input device keyboard;
-Store the character in the GPR in the PCB;
+     printf("%s\n","Please enter char" );
+      char c=scanf("%s");
+    //Read one character from standard input device keyboard;
+    //Store the character in the GPR in the PCB;
+      long ch= (long)c;
+      MainMemory[PCBptr+pcbGPR0]=ch;
+      InsertIntoRQ(PCBptr);
   }
+  
 
-  If no matching PCB is found in WQ and RQ, print invalid pid as error message;
-    */
+  //If no matching PCB is found in WQ and RQ, print invalid pid as error message;
+    
   return;
 }  // end of ISRinputCompletionInterrupt() function
 
 //Output Completion Interrupt
-Void ISRoutputCompletionInterrupt()
+void ISRoutputCompletionInterrupt()//method by connor Huggan
 {
-  /*
-  Prompt and read PID of the process completing input completion interrupt;
+  int foundRQ;
+  int PID;
+  printf("Enter PID =>\n");
+  scanf("%d", &PID);
 
-  Search WQ to find the PCB having the given PID
+  long pcb_pointer = SearchAndRemovePCBfromWQ(PID);
+  if(pcb_pointer == EndOfList)
   {
-Remove PCB from the WQ;
-Print the character in the GPR in the PCB;
-Set process state to Ready in the PCB;
-Insert PCB into RQ;
-}
-
-  If no match is found in WQ, then search RQ
-  {
-Print the character in the GPR in the PCB;
+    pcb_pointer = RQ;
+    while(pcb_pointer != EndOfList)
+    {
+      if(MainMemory[pcb_pointer + pcbPID] == PID)
+      {
+        char i = MainMemory[pcb_pointer + pcbGPR7] + '0';
+        printf("The character is: %c\n", i);
+      }
+      else
+      {
+        pcb_pointer = MainMemory[pcb_pointer+ NextPointer];
+      }
+    }
+    if(!foundRQ)
+    {
+      printf("No matching PID found in RQ\n");
+    }
   }
-
-  If no matching PCB is found in WQ and RQ, print invalid pid as error message;
-
-  */
+  else
+  {
+    char c = MainMemory[pcb_pointer + pcbGPR7] + '0';
+    printf("The character is: %c\n", c);
+    MainMemory[pcb_pointer + PCBState] = ReadyState;
+    InsertIntoRQ(pcb_pointer);
+  }
   return;
 
 }  // end of ISRonputCompletionInterrupt() function
 
 //Shutdown Sytem Interrupt
-Void ISRshutdownSystem()
+void ISRShutdownSystem()
 {
-  /*
-  // Terminate all processes in RQ one by one
-  Set ptr = RQ; // set ptr to first PCB pointed by RQ
+  shutdown = 1;
+  long pointer;
 
-  while(ptr is not equal to End Of List)
+  pointer = RQ;
+
+  while(pointer != EndOfList)
   {
-    Set RQ = next PCB using ptr;
-    Call Terminate Process passing ptr as argument;
-    Set ptr = RQ;
+    RQ = MainMemory[RQ + NextPointer];
+    TerminateProcess(pointer);
+    pointer = RQ;
   }
-
-  // Terminate all processed in WQ one by one
-
-  Code is similar to terminating processes in RQ given above.
-  */
-
+  pointer = WQ;
+  while(pointer != EndOfList)
+  {
+    WQ = MainMemory[WQ + NextPointer];
+    TerminateProcess(pointer);
+    pointer = WQ;
+  }
   return;
-}  // end of ISRshutdownSystem() function
+} // end of ISRshutdownSystem() function
 
 //Search and Remove PCB from WQ
-long SearchAndRemovePCBfromWQ ( long pid)
+long SearchAndRemovePCBfromWQ ( long pid) //Method by Fraz Ikram
 {
-  /*
+  
   long currentPCBptr = WQ;
   long previousPCBptr = EndOfList;
 
@@ -1414,84 +1725,31 @@ long SearchAndRemovePCBfromWQ ( long pid)
   // If a match is found, remove it from WQ and return the PCB pointer
   while (currentPCBptr != EndOfList)
   {
-    If(Memory[PCBptr + pidIndex] == pid)
+    if(MainMemory[currentPCBptr + pcbPID] == pid)
     {
       // match found, remove from WQ
       if(previousPCBptr == EndOfList)
       { // first PCB
-        WQ = Memory[currentPCBptr + nextPCBIndex];
+        WQ = MainMemory[currentPCBptr + NextPointer];
       }
       else
       { // not first PCB
-        Memory[previousPCBptr+nextPCBIndex] = 
-            Memory[currentPCBptr+nextPCBIndex];
+        MainMemory[previousPCBptr+NextPointer] = MainMemory[currentPCBptr+NextPointer];
       }
-      Memory[currentPCBptr+nextPCBIndex] = EndOfList;
+      MainMemory[currentPCBptr+NextPointer] = EndOfList;
       return(currentPCBptr);
     }
     previousPCBptr = currentPCBptr;
-    currentPCBptr = Memory[currentPCBptr + nextPCBIndex];
+    currentPCBptr = MainMemory[currentPCBptr + NextPointer];
   }  // end while currentPCBptr
 
   // No matching PCB is found, display pid message and return End of List code
-  Display pid not found message;
-  */
+  printf("%s\n", "No matching PID found in Waiting Queue");
 
   return (EndOfList);
 }  // SearchAndRemovePCBfromWQ
 
-//Revised Initialize System Function
-void InitializeSystem()
-{
-  /*
-  // Initialize all hardware component to zero: Main memory and CPU registers
 
-Initialize all main memory locations to zero; // Main memory
-
-Initialize all GPRs to zero;  // General purpose registers
-
-Set registers MAR, MBR, IR, PC, SP, PSR and Clock to zero;*/
-
-
-  MAR=0;
-  MBR=0;
-  CLK=0;
-  IR=0;
-  PSR=0;
-  PC=0;
-  SP=0;
-  int a;
-  for(a=0; a<MEMSIZE;a=a+1 )
-  {
-    //printf("%d\n", a);
-    MainMemory[a]=0;
-  }
-   int b;
-
-  for(b=0; b<8;b=b+1 )
-  {
-    GPR[b]=0;
-  }
-
-  /*
-// Create User free list using the free block address and size given in the class
-Set User Free List = start address given in the class;
-Set the next user free block pointer = End Of List;
-Set second location in the free block = size of free block;  // size is given in the class*/
-
-
-
-
-
-/*// Create OS free list using the free block address and size given in the class
-Set OS Free List = start address given in the class;
-Set next OS free block pointer = End Of List;
-Set second location in the free block = size of free block;    // size is given in the class
-
-Call Create Process function passing Null Process Executable File and priority zero as arguments
-*/
-  return;
-}  // end InitializeSystem() function
 
 
 
