@@ -1,0 +1,24 @@
+Label   Mnemonic   Operand    Description
+Main	Function              Start of Main function
+R       Long       234567     Random number we chose initialized
+Size    Long       150        Size of dynamic memory
+Sign    Long       -1         Variable used to change sign of a number
+M       Long       5          Fixed number M between 2 to 10 to be added
+Count   Long       150        Initialize Count for loop
+Start   Move       R2,Size    Move Size into R2
+	SysCall    mem_alloc  Memory System Allocate System call
+Branch  BrOnMinus  R0,HALT    If R0<0 jump to halt
+	Move       R4, R      Move R(Random) to R4
+	Move       R6, Sign   Move sign to R6
+	Move       R5, M      Move M to R5
+	Move       R7, count  Move Count to R7
+	Move       R3,R1      Move R1(starting location)to R3
+Loop    Move       (R3)++,R4  Move R2 to the memorlocation pointed by R3,auttoincrement it 				
+Add                R4, R5     Adding M to the random number
+	Multi      R4, R6     Multiply R4 by sign to change the sign of the number
+	Multi      R5, R6     Multiply R5 by sign to change the sign of M.
+	Sub        R7,1       Decrement count by 1
+	BrOnPlus   R7,Loop     Check if loop count is greater than zero.
+	SysCall    MemFreeSys  Calling the Memfree system call function
+HALT    Halt                   Stop Execution of a program    
+End     Start                  Execution starts the main function.

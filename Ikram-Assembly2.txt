@@ -1,0 +1,102 @@
+Label      Mnemonic   Operand    Description
+
+Main                Function                                  Start of Main function
+
+init                   Long                1111                 A random 4-digit number.
+
+Num                Long                10                    Number of numbers to be pushed and poped
+
+M                     Long                8                      Outer loop.
+
+Start                 Move                R2, M               Move M into R2
+
+OLoop              Move                R3,Num          
+
+                        Move                R1,init              move init to R1
+
+ILoop1             Push                 R1                    First inner loop for pushes
+
+                        Add                  R1,1
+
+                        Subtract           R3,1                 Decrement for the first inner loop.
+
+                        BrOnPlus         R3,ILoop1
+
+                        Move                R3,Num           Second inner loop for pushes
+
+ILoop2             Pop                  R1       
+
+                        Subtract           R3,1                 Decrement for the swcond inner loop.
+
+                        BrOnPlus         R3,ILoop2
+
+                        Subtract           R2,1                 Decrement the outer count.
+
+                        BrOnPlus         R2,OLoop
+
+                        HALT              Halt                  Stop Execution of a program    
+
+End                  Start                                         Execution starts the main function.      
+
+
+ 
+
+Address                       Content           Comment
+
+3053                            1111                A random 4-digit number.
+
+3054                            10                    Number of number to be pushed and popped.
+
+3055                            8                      Outer loop count, M
+
+3056                            51250              Move M into R2
+
+3057                            3055
+
+3058                            51350              Move loop count to R3
+
+3059                            3054   
+
+3060                            51150              Move init to R1
+
+3061                            3053               
+
+3062                            101100            Push R1
+
+3063                            11160              Increment R1
+
+3064                            1
+
+3065                            21360              Decrement first inner loop counter.
+
+3066                            1
+
+3067                            81300              Branch on plus
+
+3068                            3062
+
+3069                            51350              Move loop count to R3
+
+3070                            3054
+
+3071                            111100            Pop to R1
+
+3072                            21360              Decrement second inner loop counter.
+
+3073                            1
+
+3074                            81300              Branch on plus in R3
+
+3075                            3071
+
+3073                            21260              Decrement outer loop counter R2
+
+3074                            1
+
+3075                            81200              Branch on plus on R2
+
+3076                            3058
+
+3077                            0                      Halt
+
+-1                                 3056                End of program. PC=3056

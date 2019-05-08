@@ -1,0 +1,15 @@
+Label	Mnemonic	Operands	Description
+--------------------------------------------------------------------------
+main	Function
+	Origin		33
+num	Long		1111		Initialize Long value num as 1111
+M	Long		9		Initialize Long value M as 10
+Start	Move		R2, num		R2 = num
+Loop	Push		num		Push value of num on to the stack
+	Pop		num		Pop value of num from the stack
+	Add		num, 1		num = num + 1
+	Move		R2, num		R2 = num
+	Subtract	M, 1		M = M - 1
+	BranchOnPlus	M, Loop 	If M > 0, jump to Loop
+	Halt				Program halts execution
+	End		Start		Program starts execution at Loop label

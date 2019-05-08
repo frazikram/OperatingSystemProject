@@ -1,0 +1,26 @@
+Label		Mnemon		Operand		Comments	
+Main		Function                        Start of Main function
+		Origin		3082
+Size		Long		9               Size of dynamic memory
+Count	        Long            5               Initialize Count for loop
+Start		Move            R2,Size         Move Size into R2
+		SysCall         mem_alloc       Memory System Allocate System call
+Branch          BrOnMinus      	R0,HALT         If R0<0 jump to halt
+		Move            R3,R1           Move R1 to R3, the starting location.
+		Move            R7,R1           Move R1 to R3, the starting location.
+		Move            R4,count        Move Count to R4.
+Loop1           SystemCall      io_getc         Read in a character from the keyboard.
+		Move            (R3)++,R1       Write the read char into the memory location(R3) and auto-increment 
+		Sub              R4, 1          Decrement count by 1
+		BrOnPlus         R4, Loop1      Check if loop count is non-negative
+		Move             R4, count      Move Count to R4.
+		Move             R3,R7          Resetting R3 to the starting location.
+Loop2		Move             R1, (R3)++     Read char from the memory location(R3) into R1 and auto-increment it
+		SystemCall       io_putc        Print in a character.
+		Sub              R4, 1          Decrement count by 1
+		BrOnPlus         R4, Loop2      Check if loop count is non-negative
+		Move             R1, R7         Starting location
+		Move             R2, Size            Move value of size in to R2 for Mem free syscall
+		SysCall          MemFreeSys     Calling the Memfree system call function
+HALT            Halt                                          Stop Execution of a program    
+End             Start                                         Execution starts the main function.      

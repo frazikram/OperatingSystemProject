@@ -1,0 +1,72 @@
+Address                       Content           Comment
+
+0                                  9                      Size of the memory allocated.
+
+1                                  5                      Count
+
+2                                  51250              Start, Move size (9) from mem-location to R2
+
+3                                  0                      Address of the memory location.
+
+4                                  12000              System Call
+
+5                                  4                      mem_alloc
+
+6                                  71000              Check for error code, if less than zero, jump to HALT.
+
+7                                  32                    Address of HALT.
+
+9                                  51311              Load starting location in R3 from R1(output of mem_alloc)
+
+10                                51311              Load starting location in R7 from R1(output of mem_alloc)
+
+11                                51750              Load count in R4 from mem-location 1
+
+12                                1
+
+13                                12000              Start of the loop1. System Call.
+
+14                                8                      System call ID for io_getc
+
+15                                53311              io_getc leaves it in R1. Auto increment R3 to the next.
+
+16                                21460              Decrement the loop counter
+
+17                                1                      Immediate operand.
+
+18                                81700              Loop back if counter is greater than 0
+
+19                                13                    Address of the loop1.
+
+20                                51750              Load count in R4 from mem-location 1
+
+21                                1
+
+22                                51317              Load starting location in R3 from R7
+
+23                                51133              Read into R1 from memory location pointed by R3 and increment R3. Start of loop2
+
+24                                SystemCall     print character in R1, start of loop2
+
+25                                21460              Decrement the loop counter
+
+26                                1                      Immediate operand.
+27                                81700              Loop back if counter is greater than 0
+
+28                                23                    Address of the loop2.
+
+29                                51250              Copy size of memory being freed in R2
+
+30                                0                      Address of the size of the array in memory.
+
+31                                51117              Starting pointer of the memory allocation into R1 from R7
+
+32                                12000              System Call
+
+33                                5                      mem_free id.
+
+33                                0                      Halt
+
+-1                                5                      End of program. PC=2
+
+

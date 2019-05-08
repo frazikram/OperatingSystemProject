@@ -1,0 +1,62 @@
+3055                            1111                A random 4-digit number.
+
+3056                            10                    Number of number to be pushed and popped.
+
+3057                            8                      Outer loop count, M
+
+3058                            51250              Move M into R2
+
+3059                            3055
+
+3060                            51350              Move loop count to R3
+
+3061                            3056   
+
+3062                            51150              Move init to R1
+
+3063                            3055               
+
+3064                            101100            Push R1
+
+3065                            11160              Increment R1
+
+3066                            1
+
+3067                            21360              Decrement first inner loop counter.
+
+3068                            1
+
+3069                            81300              Branch on plus
+
+3070                            3064
+
+3071                            51350              Move loop count to R3
+
+3072                            3056
+
+3073                            111100            Pop to R1
+
+3074                            21360              Decrement second inner loop counter.
+
+3075                            1
+
+3076                            81300              Branch on plus in R3
+
+3077                            3073
+
+3078                            21260              Decrement outer loop counter R2
+
+3079                            1
+
+3080                            81200              Branch on plus on R2
+
+3081                            3060
+
+3082                            0                      Halt
+
+-1                              3058                End of program. PC=3056
+
+ 
+
+ 
+

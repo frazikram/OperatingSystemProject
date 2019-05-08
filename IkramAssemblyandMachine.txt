@@ -1,0 +1,243 @@
+Null Process//By Spencer Kehoe
+
+Label		Mnemonic		Operand		Description
+Main		Function				Start of main function
+Loop		Branch			Loop		Start of loop/Branch into loop
+		End			Loop		End of Loop
+
+
+Machine:
+
+Address		Content		Comment
+3000		6000		Branch
+-1              3000		Calls back to first Address
+
+---------------------------------------------------------------------------------------------------------------------------------
+Program 1//By Fraz Ikram
+
+Assembly:
+Label   Mnemonic   Operand    Description
+Main	Function              Start of Main function
+R       Long       234567     Random number we chose initialized
+Size    Long       150        Size of dynamic memory
+Sign    Long       -1         Variable used to change sign of a number
+M       Long       5          Fixed number M between 2 to 10 to be added
+Count   Long       150        Initialize Count for loop
+Start   Move       R2,Size    Move Size into R2
+	SysCall    mem_alloc  Memory System Allocate System call
+Branch  BrOnMinus  R0,HALT    If R0<0 jump to halt
+	Move       R4, R      Move R(Random) to R4
+	Move       R6, Sign   Move sign to R6
+	Move       R5, M      Move M to R5
+	Move       R7, count  Move Count to R7
+	Move       R3,R1      Move R1(starting location)to R3
+Loop    Move       (R3)++,R4  Move R2 to the memorlocation pointed by R3,auttoincrement it 				
+Add                R4, R5     Adding M to the random number
+	Multi      R4, R6     Multiply R4 by sign to change the sign of the number
+	Multi      R5, R6     Multiply R5 by sign to change the sign of M.
+	Sub        R7,1       Decrement count by 1
+	BrOnPlus   R7,Loop     Check if loop count is greater than zero.
+	SysCall    MemFreeSys  Calling the Memfree system call function
+HALT    Halt                   Stop Execution of a program    
+End     Start                  Execution starts the main function.
+
+Symbol table:
+  Symbol|Value(Address)
+      -------------------
+          R|3013
+       size|3012
+       Sign|3014
+      Count|3016
+	  M|3015
+
+Machine: 
+Address                       Content           Comment
+3012                            150               Size of the array.
+3013   	                        234567            Random number.
+3014                            -1                Sign
+3015                          	2                 M
+3016                            150               Count
+3017                            51250             Start, Move size (150) from mem-location to R2
+3018                            3012              Address of the memory location.
+3019                            126000            System Call
+3020                            4                 mem_alloc
+3021                            71000             Check for error code, if less than zero, jump to HALT.
+3022                            3043              Address of HALT.
+3023                            51311             Load starting location in R3 from R1(output of mem_alloc)
+3024                            51450             Load random number in R4 from mem-location 3013
+3025                            3013              Address of random number
+3026                            51550             Load M in R5 from mem-location 3015
+3027                            3015              Address of M
+3028                            51650             Load sign in R6 from mem-location 3014
+3029                            3014
+3030                            51750             Load count in R7 from mem-location 3016
+3031                            3016
+3032                            53314             Start of the loop. Load R4 in the allocated memory loc.
+3033                            11415             Add M (R5) to random number (R4).
+3034                            31416             Multiply Sign (R6) to random number (R4).
+3035                            31516             Multiply Sign (R6) to random number (R5).
+3036                            21760             Decrement the loop counter
+3037                            1                 Immediate operand.
+3038                            81700             Loop back if counter is greater than 0
+3039                            3032              Address of the loop.
+3040                            51250             Load R2 with the size for the mem_free call.
+3041                            3012              Address of the size of the array in memory.
+3042                            126000            System Call
+3043                            5                 mem_free id.
+3044                            0                 Halt
+-1                             3017               End of program. PC=2
+-----------------------------------------------------------------------------------------------------------------------------------------
+Program 2//By Fraz Ikram
+
+Assembly:
+
+Label      Mnemonic   Operand    Description
+Main       Function              Start of Main function
+init       Long        1111      A random 4-digit number.
+Num        Long          10      Number of numbers to be pushed and poped
+M          Long           8      Outer loop.
+Start      Move       R2, M      Move M into R2
+Loop       Move       R3,Num          
+	   Move       R1,init	 Move init to R1
+Loop1      Push       R1         First inner loop for pushes
+	   Add        R1,1
+	   Subtract   R3,1       Decrement for the first inner loop.
+	   BrOnPlus   R3,ILoop1
+	   Move       R3,Num     Second inner loop for pushes
+Loop2      Pop        R1       
+	   Subtract   R3,1       Decrement for the swcond inner loop.
+	   BrOnPlus   R3,ILoop2
+	   Subtract    R2,1       Decrement the outer count.
+	   BrOnPlus    R2,OLoop
+HALT       Halt                   Stop Execution of a program    
+
+End        Start                  Execution starts the main function. 
+
+Symbol Table:
+	  Symbol|Value(Address)
+      -------------------
+          Init|3053
+	    M |3055
+	   Num|10
+	
+Machine:
+
+Address                       Content           Comment
+3053                            1111            A random 4-digit number.
+3054                            10              Number of number to be pushed and popped.
+3055                            8               Outer loop count, M
+3056                            51250           Move M into R2
+3057                            3055
+3058                            51350           Move loop count to R3
+3059                            3054   
+3060                            51150           Move init to R1
+3061                            3053              
+3062                            101100          Push R1
+3063                            11160           Increment R1
+3064                            1
+3065                            21360           Decrement first inner loop counter.
+3066                            1
+3067                            81300           Branch on plus
+3068                            3062
+3069                            51350           Move loop count to R3
+3070                            3054
+3071                            111100          Pop to R1
+3072                            21360           Decrement second inner loop counter.
+3073                            1
+3074                            81300           Branch on plus in R3
+3075                            3071
+3073                            21260           Decrement outer loop counter R2
+3074                            1
+3075                            81200           Branch on plus on R2
+3076                            3058
+3077                            0               Halt
+-1                              3056            End of program. PC=3056
+----------------------------------------------------------------------------------------------------------------------------------
+Program 3//By Connor Huggan
+
+Assembly:
+
+Label    Mnemonic   Operand      Description
+
+Main     Function                Start of Main function
+Size     Long         9          Size of dynamic memory
+Count    Long         5          Initialize Count for loop
+Start    Move         R2,Size    Move Size into R2
+         SysCall      mem_alloc  Memory System Allocate System call
+Branch   BrOnMinus    R0,HALT    If R0<0 jump to halt
+	 Move         R3,R1      Move R1 to R3, the starting location.
+	 Move         R7,R1      Move R1 to R3, the starting location.
+	 Move         R4,count   Move Count to R4.
+Loop1    SystemCall   io_getc    Read in a character from the keyboard.
+	 Move         (R3)++,R1  Write the read char into the memory location(R3) and auto-increment it
+	 Sub          R4, 1      Decrement count by 1
+	 BrOnPlus     R4, Loop1  Check if loop count is non-negative
+	 Move         R4, count  Move Count to R4.
+	 Move         R3,R7      Resetting R3 to the starting location.
+Loop2    Move         R1, (R3)++ Read char from the memory location(R3) into R1 and auto-increment it
+	 SystemCall   io_putc    print in a character.
+	 Sub          R4, 1      Decrement count by 1
+	 BrOnPlus     R4, Loop2  Check if loop count is non-negative
+	 Move         R1, R7     Starting location
+	 Move         R2, Size   Move value of size in to R2 for Mem free syscall
+	 SysCall      MemFreeSys Calling the Memfree system call function
+HALT     Halt                    Stop Execution of a program    
+End      Start                   Execution starts the main function.
+
+Symbol Table:
+         Symbol|Value(Address)
+      -------------------
+          Count|3085
+MemoryAllocated|3084
+
+
+
+
+Machine:
+
+Address                           Content      Comment
+3084                                 9            Size of the memory allocated.
+3085                                 5            Count
+3086                                 51250        Start, Move size (9) from mem-location to R2
+3087                                 3082         Address of the memory location.
+3088                                 126000       System Call
+3089                                 4            mem_alloc
+3090                                 71000        Check for error code, if less than zero, jump to HALT.
+3091                                3117           Address of HALT.
+3092                                51311        Load starting location in R3 from R1(output of mem_alloc)
+3093                                51711        Load starting location in R7 from R1(output of mem_alloc)
+3094                                51450        Load count in R4 from mem-location 3083
+3095                                3083
+3096                                126000        Start of the loop1. System Call.
+3097                                8             System call ID for io_getc
+3098                                53311         io_getc leaves it in R1. Auto increment R3 to the next.
+3099                                21460         Decrement the loop counter
+3100                                1             Immediate operand.
+3101                                81400         Loop back if counter is greater than 0
+3102                                3094            Address of the loop1.
+3103                                51450         Load count in R4 from mem-location 3083
+3104                                3083
+3105                                51317         Load starting location in R3 from R7
+3106                                51133         Read into R1 from memory location pointed by R3 and increment R3. Start of loop2
+3107                               126000         print character in R1, start of loop2
+3108                                21460         Decrement the loop counter
+3109                                1             Immediate operand.
+3110                                81700         Loop back if counter is greater than 0
+3111                                3104          Address of the loop2.
+3112                                51250         Copy size of memory being freed in R2
+3113                                3082          Address of the size of the array in memory.
+3114                                51117         Starting pointer of the memory allocation into R1 from R7
+3115                                126000         System Call
+3116                                5              mem_free id.
+3117                                0              Halt
+-1                                  3086           End of program. PC=3086     
+
+
+
+ 
+
+ 
+
+
+
+
